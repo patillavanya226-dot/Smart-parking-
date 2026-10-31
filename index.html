@@ -1,1 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Smart Parking System</title>
+<style>
+:root{--bg:#f1f5f9;--fg:#172033;--card:#fff;--muted:#526174;--accent:#1769aa;--accent-h:#0d4778;--head:#123c69;--line:#e5e7eb;--th:#eaf1f8;--free:#dcfce7;--free-b:#86efac;--busy:#fee2e2;--busy-b:#fca5a5;--input-b:#ccd5e0;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0f172a;--fg:#e2e8f0;--card:#1e293b;--muted:#94a3b8;--accent:#3b82f6;--accent-h:#2563eb;--head:#0b2545;--line:#334155;--th:#273449;--free:#14532d;--free-b:#22c55e;--busy:#7f1d1d;--busy-b:#ef4444;--input-b:#475569;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--fg)}
+header{background:var(--head);color:#fff;padding:25px;text-align:center}
+header h1{margin:0 0 8px}header p{margin:0;opacity:.85}
+main{max-width:1000px;margin:25px auto;padding:15px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:15px}
+.card,.panel{background:var(--card);padding:20px;border-radius:12px;box-shadow:0 3px 12px #0002}
+.number{font-size:28px;font-weight:bold;color:var(--accent);margin-top:8px}
+.panel{margin-top:20px}.panel h2{margin-top:0}
+input,select,button{padding:12px;border-radius:7px;border:1px solid var(--input-b);margin:5px 0;font-size:15px;background:var(--card);color:var(--fg)}
+input,select{width:100%}
+button{background:var(--accent);color:#fff;border:0;cursor:pointer;width:100%}
+button:hover{background:var(--accent-h)}
+button.ghost{background:transparent;color:var(--muted);border:1px solid var(--input-b);width:auto;font-size:13px;padding:8px 12px}
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end}
+.slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-top:15px}
+.slot{padding:18px 8px;text-align:center;border-radius:10px;background:var(--free);border:1px solid var(--free-b)}
+.slot.busy{background:var(--busy);border-color:var(--busy-b)}
+.small{font-size:13px;color:var(--muted);margin-top:7px}
+.slot .small{color:inherit;opacity:.8}
+table{width:100%;border-collapse:collapse;margin-top:15px}
+th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line)}
+th{background:var(--th)}
+.message{margin-top:12px;font-weight:bold}
+</style>
+</head>
+<body>
+<header>
+<h1>Smart Parking System</h1>
+<p>Vehicle Parking Management</p>
+</header>
+<main>
+<div class="stats">
+<div class="card">Total Slots<div class="number" id="total">8</div></div>
+<div class="card">Available<div class="number" id="available">8</div></div>
+<div class="card">Occupied<div class="number" id="occupied">0</div></div>
+<div class="card">Total Revenue<div class="number" id="revenue">₹0</div></div>
+</div>
+<div class="stats" id="typeStats" style="margin-top:15px"></div>
 
+<div class="panel">
+<h2>Vehicle Check-In</h2>
+<div class="form">
+<div><label for="vehicle">Vehicle Number</label><input id="vehicle" placeholder="e.g. MH46AB1234" autocomplete="off"></div>
+<div><label for="type">Vehicle Type</label><select id="type"><option>Bike</option><option>Car</option><option>Truck</option></select></div>
+<div><button onclick="park()">Park Vehicle</button></div>
+</div>
+<div id="message" class="message"></div>
+</div>
+
+<div class="panel">
+<h2>Parking Slots</h2>
+<div class="slots" id="slots"></div>
+<p class="small">Green = Available | Red = Occupied. Maximum 200 slots. Rates per hour: Bike ₹10, Car ₹20, Truck ₹40.</p>
+</div>
+
+<div class="panel">
+<h2>Add Parking Slots</h2>
+<p class="small" style="margin-top:0">The parking lot has a maximum of 200 slots in total.</p>
+<div class="form">
+<div><label for="addType">Slot Type</label><select id="addType"><option>Bike</option><option>Car</option><option>Truck</option></select></div>
+<div><label for="addCount">How many?</label><input id="addCount" type="number" min="1" max="200" value="1"></div>
+<div><button onclick="addSlots()">Add Slots</button></div>
+</div>
+<div id="addMessage" class="message"></div>
+</div>
+
+<div class="panel">
+<h2>Vehicle Check-Out</h2>
+<div class="form">
+<div><label for="exitSlot">Select Occupied Slot</label><select id="exitSlot"></select></div>
+<div><button onclick="leave()">Check Out Vehicle</button></div>
+</div>
+<div id="exitMessage" class="message"></div>
+</div>
+
+<div class="panel">
+<h2>Parking History</h2>
+<div style="overflow-x:auto">
+<table>
+<thead><tr><th>Vehicle</th><th>Type</th><th>Slot</th><th>Fee</th></tr></thead>
+<tbody id="history"></tbody>
+</table>
+</div>
+<button class="ghost" id="resetBtn" onclick="resetAll()">Reset system</button>
+</div>
+
+</main>
+<script>
+const DEFAULT_TYPES=[...Array(80).fill("Bike"),...Array(80).fill("Car"),...Array(40).fill("Truck")];
+const RATES={Bike:10,Car:20,Truck:40};
+const KEY="smart-parking-v1";
+const MAX_SLOTS=200;
+let state=fresh();
+
+function fresh(){return{types:DEFAULT_TYPES.slice(),slots:DEFAULT_TYPES.map(()=>null),revenue:0,history:[],ticket:1000}}
+function valid(d){return d&&Array.isArray(d.slots)&&Array.isArray(d.types)&&d.slots.length>0&&d.types.length===d.slots.length}
+function load(){try{const s=localStorage.getItem(KEY);if(s){const d=JSON.parse(s);if(valid(d)){if(!Array.isArray(d.history))d.history=[];state=d}}}catch(e){}}
+function save(){try{localStorage.setItem(KEY,JSON.stringify(state))}catch(e){}}
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function refresh(){
+ const used=state.slots.filter(Boolean).length;
+ $("total").textContent=state.slots.length;
+ $("available").textContent=state.slots.length-used;
+ $("typeStats").innerHTML=["Bike","Car","Truck"].map(t=>{const all=state.types.filter(x=>x===t).length;const free=state.types.filter((x,i)=>x===t&&!state.slots[i]).length;return `<div class="card"><b>${t}</b><div class="number">${free} <span class="small">available of ${all}</span></div></div>`}).join("");
+ $("occupied").textContent=used;
+ $("revenue").textContent="₹"+state.revenue;
+ $("slots").innerHTML=state.slots.map((v,i)=>
+  `<div class="slot ${v?"busy":""}"><b>Slot ${i+1}</b><div>${state.types[i]}</div><div class="small">${v?esc(v.vehicle):"Available"}</div></div>`).join("");
+ const sel=$("exitSlot"),old=sel.value;
+ sel.innerHTML=state.slots.map((v,i)=>v?`<option value="${i+1}">Slot ${i+1} - ${esc(v.vehicle)}</option>`:"").join("");
+ if([...sel.options].some(o=>o.value===old))sel.value=old;
+ $("history").innerHTML=state.history.length?
+  state.history.map(h=>`<tr><td>${esc(h.vehicle)}</td><td>${h.type}</td><td>${h.slot}</td><td>₹${h.fee}</td></tr>`).join(""):
+  '<tr><td colspan="4">No completed parking yet</td></tr>';
+}
+
+function park(){
+ const vehicle=$("vehicle").value.trim().toUpperCase();
+ const type=$("type").value;
+ const msg=$("message");
+ if(!vehicle){msg.textContent="Please enter a vehicle number.";return}
+ if(state.slots.some(v=>v&&v.vehicle===vehicle)){msg.textContent="This vehicle is already parked.";return}
+ const i=state.types.findIndex((t,idx)=>t===type&&!state.slots[idx]);
+ if(i<0){msg.textContent="No available slot for this vehicle type. Add more slots below.";return}
+ state.slots[i]={vehicle,entry:Date.now()};
+ state.ticket=(state.ticket||1000)+1;
+ msg.textContent=`Vehicle parked successfully in Slot ${i+1}. Ticket: P${state.ticket}`;
+ $("vehicle").value="";
+ save();refresh();
+}
+
+function leave(){
+ const msg=$("exitMessage");
+ const slot=Number($("exitSlot").value)-1;
+ if(!(slot>=0)||!state.slots[slot]){msg.textContent="No occupied slots available.";return}
+ const v=state.slots[slot];
+ const minutes=Math.max(1,Math.ceil((Date.now()-v.entry)/60000));
+ const fee=Math.ceil(minutes/60)*RATES[state.types[slot]];
+ state.revenue+=fee;
+ state.history.unshift({vehicle:v.vehicle,type:state.types[slot],slot:slot+1,fee});
+ state.slots[slot]=null;
+ msg.textContent=`Checkout successful. Parking fee: ₹${fee}`;
+ save();refresh();
+}
+
+function addSlots(){
+ const type=$("addType").value;
+ const n=Math.floor(Number($("addCount").value));
+ const msg=$("addMessage");
+ const room=MAX_SLOTS-state.slots.length;
+ if(room<=0){msg.textContent="Maximum of 200 slots reached.";return}
+ if(!(n>=1)){msg.textContent="Enter a number of 1 or more.";return}
+ if(n>room){msg.textContent=`You can add only ${room} more slot${room>1?"s":""} (limit is 200).`;return}
+ for(let k=0;k<n;k++){state.types.push(type);state.slots.push(null)}
+ msg.textContent=`Added ${n} ${type} slot${n>1?"s":""}. Total slots: ${state.slots.length}.`;
+ save();refresh();
+}
+
+let resetArmed=false,resetTimer=null;
+function resetAll(){
+ const b=$("resetBtn");
+ if(!resetArmed){resetArmed=true;b.textContent="Click again to confirm reset";resetTimer=setTimeout(()=>{resetArmed=false;b.textContent="Reset system"},5000);return}
+ clearTimeout(resetTimer);resetArmed=false;b.textContent="Reset system";
+ state=fresh();save();refresh();
+ $("message").textContent="";$("exitMessage").textContent="";
+}
+
+$("vehicle").addEventListener("keydown",e=>{if(e.key==="Enter")park()});
+load();refresh();
+</script>
+</body>
+  </html>
